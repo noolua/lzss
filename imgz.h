@@ -9,6 +9,14 @@ extern "C" {
 #include "lzss.h"
 #define RGBA_SIZE 4
 
+typedef struct imgz_progm_s{
+  const uint16_t _size;
+  const uint8_t _content[0];
+}imgz_progm_t;
+
+#define imgz4progm(d)   (const imgz_progm_t*)(d)
+
+
 typedef struct imgz_decoder_cb_s{
   int32_t (*on_header)(void *ud, uint8_t width, uint8_t height, uint8_t mode, uint8_t palette_count);
   int32_t (*on_palette)(void *ud, uint8_t *palettes[RGBA_SIZE], uint8_t palette_count);
