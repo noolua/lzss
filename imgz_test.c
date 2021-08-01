@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
   callbacks.ud = ctx;
 
   const uint8_t *encode_data = imgz_spr_background_cd00 + sizeof(uint16_t);
-  size_t data_len = *(const uint16_t *)imgz_spr_background_cd00;
+  uint16_t data_len = *(const uint16_t *)imgz_spr_background_cd00;
 
   // working
   ret = imgz_decode(&ctx->lz, &ctx->stream, encode_data, data_len, &callbacks);

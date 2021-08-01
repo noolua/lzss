@@ -87,5 +87,5 @@ int main(int argc, char *argv[]) {
   // cleanup
   fclose(infile);
   fclose(outfile);
-  return 0;
+  return ret;
 }
