@@ -1,5 +1,3 @@
-/* LZSS encoder-decoder (Haruhiko Okumura; public domain) */
-
 #include "imgz.h"
 #include <stdio.h>
 #include <stdlib.h>

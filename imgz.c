@@ -1,5 +1,3 @@
-/* LZSS encoder-decoder (Haruhiko Okumura; public domain) */
-
 #include "imgz.h"
 #include <string.h>
 #define IMGZ_HEAD_SIZE 4
