@@ -10,7 +10,7 @@ extern "C" {
 #ifdef __MACH__
   typedef unsigned long imgz_size_t;
 #else
-  typedef size_t imgz_size_t;
+  typedef __SIZE_TYPE__ imgz_size_t;
 #endif
 
 #define RGBA_SIZE 4

@@ -42,7 +42,7 @@ static int32_t pixel_read(void* fp, void* buff, int32_t buff_len) {
   if(stream->stream_type == IMGZ_MEMORY) {
     if(stream->input.mem.position < stream->input.mem.content_sz && buff_len > 0) {
       read_sz = (stream->input.mem.content_sz - stream->input.mem.position) > buff_len ? buff_len : (stream->input.mem.content_sz - stream->input.mem.position);
-      memcpy(buff, stream->input.mem.content + stream->input.mem.position, read_sz);
+      memcpy(buff, (const uint8_t *)(stream->input.mem.content) + stream->input.mem.position, read_sz);
       stream->input.mem.position += read_sz;
     }
   }else{

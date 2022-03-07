@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
     #else
 
     lzss_chunked_decoder_t lcdz;
-    fprintf(stderr, "sizeof(lzss_chunked_decoder_t): %lu\n", sizeof(lcdz));
+    fprintf(stderr, "sizeof(lzss_chunked_decoder_t): %zu\n", sizeof(lcdz));
     uint8_t buffer[7];
     int32_t buff_size = 7;
     lzss_chunked_decode_init_std(&lcdz, infile);

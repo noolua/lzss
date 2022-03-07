@@ -30,7 +30,8 @@ static inline int32_t lzss_putc(lzss_t *lz, uint8_t c) {
   if(lz->write_consume < LZSS_IO_BUFF){
     lz->write_buff[lz->write_consume++] = c;
   }
-  return 0;
+  ret = 0;
+  return ret;
 }
 
 static inline int32_t lzss_putc_flash(lzss_t *lz) {
