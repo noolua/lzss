@@ -20,10 +20,13 @@ extern "C" {
 #define UNCODED   1       /* If match length <= UNCODED then output one character */
 #define BUFF_SIZE (1 << OFFSET_BITS)  /* buffer size */
 #define MAX_CODED ((1 << LENGTH_BITS) + UNCODED)  /* lookahead buffer size */
+#ifndef LZSS_IO_BUFF
+  #define LZSS_IO_BUFF 256
+#endif
 
 typedef struct lzss_io_s{
-  int32_t (*getc)(void* in);
-  int32_t (*putc)(void* out, uint8_t c);
+  int32_t (*read)(void *in, void *buff, int32_t buff_len);
+  int32_t (*write)(void *out, void *data, int32_t data_len);
   void *in, *out;
 }lzss_io_t;
 
@@ -31,8 +34,10 @@ typedef struct lzss_s{
   int32_t bit_buffer, bit_mask, curr_buf, curr_mask;
   uint32_t code_count, text_count;
   uint8_t buffer[BUFF_SIZE<<1];
+  uint8_t read_buff[LZSS_IO_BUFF], write_buff[LZSS_IO_BUFF];
+  int32_t read_pos, read_consume, write_consume;
   lzss_io_t iostream;
-}lzss_t;  // sizeof(lzss_t) = 40 + 2KB
+}lzss_t;  // sizeof(lzss_t) = 40 + LZSS_IO_BUFF*2 + 2KB = 2.5KB
 
 // io_out not use.
 typedef struct lzss_chunked_decoder_s{

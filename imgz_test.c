@@ -24,6 +24,7 @@ typedef struct imgz_ctx_s{
   uint8_t width, height;
   lzss_t lz;
   imgz_stream_t stream;
+  imgz_filestream_t file_stream;
 }imgz_ctx_t;
 
 static int32_t on_header_impl(void* ud, uint8_t width, uint8_t height, uint8_t mode, uint8_t palette_count){
@@ -74,5 +75,35 @@ int main(int argc, char *argv[]) {
   free(ctx);
 
   // cleanup
+  return ret;
+}
+
+static int32_t file_read(void* fp, void *buff, int32_t buff_len) {
+  int32_t ret = fread(buff, 1, buff_len, (FILE*)fp);
+  return ret;
+}
+
+int main22(){
+  int ret = -1;
+  FILE *fp = fopen("cd.imgz", "rb");
+  if(fp){
+    fseek(fp, 2, SEEK_SET); // skip header_length(uint16_t)
+    imgz_ctx_t *ctx = malloc(sizeof(imgz_ctx_t));
+
+    imgz_decoder_cb_t callbacks = {0};
+    callbacks.on_header = on_header_impl;
+    callbacks.on_palette = on_palette_impl;
+    callbacks.on_pixel = on_pixel_impl;
+    callbacks.on_done = on_done_impl;
+    callbacks.ud = ctx;
+
+    ctx->file_stream.in.file = fp;
+    ctx->file_stream.in.read = file_read;
+    ret = imgz_decode_file(&ctx->lz, &ctx->file_stream, &callbacks);
+
+    fclose(fp);
+    free(ctx);
+  }
+
   return ret;
 }

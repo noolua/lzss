@@ -10,20 +10,65 @@ enum{
   LZDE_REASON1
 };
 
-static int32_t file_getc(void *fp){
-  return fgetc((FILE *)fp);
+static int32_t file_read(void *fp, void* buff, int32_t buff_len) {
+  return fread(buff, sizeof(uint8_t), buff_len, (FILE*) fp);
 }
 
-static int32_t file_putc(void *fp, uint8_t c){
-  return fputc(c, (FILE *)fp);
+static int32_t file_write(void *fp, void *data, int32_t data_len) {
+  return fwrite(data, sizeof(uint8_t), data_len, (FILE*) fp);
 }
 
+static inline int32_t lzss_putc(lzss_t *lz, uint8_t c) {
+  int32_t ret = -1;
+  if(lz->write_consume >= LZSS_IO_BUFF) {
+    if(lz->iostream.write(lz->iostream.out, lz->write_buff, lz->write_consume) != lz->write_consume) {
+      return -1;
+    } else {
+      lz->write_consume = 0;
+    }
+  }
+  if(lz->write_consume < LZSS_IO_BUFF){
+    lz->write_buff[lz->write_consume++] = c;
+  }
+  return 0;
+}
+
+static inline int32_t lzss_putc_flash(lzss_t *lz) {
+  int32_t ret = -1;
+  if(lz->write_consume > 0) {
+    if(lz->iostream.write(lz->iostream.out, lz->write_buff, lz->write_consume) != lz->write_consume) {
+      return -1;
+    } else {
+      ret = lz->write_consume;
+      lz->write_consume = 0;
+    }
+  } else {
+    ret = 0;
+  }
+  return ret;
+}
+
+
+static inline int32_t lzss_getc(lzss_t *lz) {
+  int32_t ret = EOF;
+  if(lz->read_pos >= lz->read_consume){
+    lz->read_consume = lz->iostream.read(lz->iostream.in, lz->read_buff, LZSS_IO_BUFF);
+    if(lz->read_consume == EOF)
+      return EOF;
+    else
+      lz->read_pos = 0;
+  }
+  if(lz->read_pos < lz->read_consume)
+    ret = lz->read_buff[lz->read_pos++];
+  return ret;
+}
 
 static void putbit(lzss_t *lz, int32_t not_zero){
   if(not_zero)
     lz->bit_buffer |= lz->bit_mask;
   if((lz->bit_mask >>= 1) == 0){
-    lz->iostream.putc(lz->iostream.out, lz->bit_buffer);
+    lzss_putc(lz, lz->bit_buffer);
+    // lz->iostream.putc(lz->iostream.out, lz->bit_buffer);
     lz->bit_buffer = 0;
     lz->bit_mask = 128;
     lz->code_count++;
@@ -32,8 +77,10 @@ static void putbit(lzss_t *lz, int32_t not_zero){
 
 static void flush_bit_buffer(lzss_t *lz) {
   if(lz->bit_mask != 128) {
-    lz->iostream.putc(lz->iostream.out, lz->bit_buffer);
+    // lz->iostream.putc(lz->iostream.out, lz->bit_buffer);
+    lzss_putc(lz, lz->bit_buffer);
     lz->code_count++;
+    lzss_putc_flash(lz);
   }
 }
 
@@ -61,7 +108,7 @@ static int32_t getbit(lzss_t *lz, int32_t n){
   int32_t i = 0, x = 0;
   for(;i < n; i++){
     if(lz->curr_mask == 0){
-      if((lz->curr_buf = lz->iostream.getc(lz->iostream.in)) == EOF) return EOF;
+      if((lz->curr_buf = lzss_getc(lz)) == EOF) return EOF;
       lz->curr_mask = 128;
     }
     x <<= 1;
@@ -83,8 +130,11 @@ int32_t lzss_init_std(lzss_t *lz, FILE *in, FILE *out){
   lz->curr_mask = 0;
   lz->code_count = 0;
   lz->text_count = 0;
-  lz->iostream.putc = file_putc;
-  lz->iostream.getc = file_getc;
+  lz->read_pos = 0;
+  lz->read_consume = 0;
+  lz->write_consume = 0;
+  lz->iostream.read = file_read;
+  lz->iostream.write = file_write;
   lz->iostream.in = in;
   lz->iostream.out = out;
   return 0;
@@ -92,15 +142,18 @@ int32_t lzss_init_std(lzss_t *lz, FILE *in, FILE *out){
 
 int32_t lzss_init_custom(lzss_t* lz, const lzss_io_t *iostream){
   if(!lz || !iostream) return -1;
-  if(!iostream->in || !iostream->out || !iostream->getc || !iostream->putc) return -1;
+  if(!iostream->in || !iostream->out || !iostream->read || !iostream->write) return -1;
   lz->bit_buffer = 0;
   lz->bit_mask = 128;
   lz->curr_buf = 0;
   lz->curr_mask = 0;
   lz->code_count = 0;
   lz->text_count = 0;
-  lz->iostream.putc = iostream->putc;
-  lz->iostream.getc = iostream->getc;
+  lz->read_pos = 0;
+  lz->read_consume = 0;
+  lz->write_consume = 0;
+  lz->iostream.read = iostream->read;
+  lz->iostream.write = iostream->write;
   lz->iostream.in = iostream->in;
   lz->iostream.out = iostream->out;
   return 0;
@@ -114,7 +167,7 @@ int32_t lzss_encode(lzss_t *lz) {
   for (i = 0; i < BUFF_SIZE - MAX_CODED; i++)
     lz->buffer[i] = ' ';
   for (i = BUFF_SIZE - MAX_CODED; i < BUFF_SIZE * 2; i++) {
-    if((c = lz->iostream.getc(lz->iostream.in)) == EOF) break;
+    if((c = lzss_getc(lz)) == EOF) break;
     lz->buffer[i] = c;
     lz->text_count++;
   }
@@ -151,7 +204,7 @@ int32_t lzss_encode(lzss_t *lz) {
       r -= BUFF_SIZE;
       s -= BUFF_SIZE;
       while (bufferend < BUFF_SIZE * 2) {
-        if((c = lz->iostream.getc(lz->iostream.in)) == EOF) break;
+        if((c = lzss_getc(lz)) == EOF) break;
         lz->buffer[bufferend++] = c;
         lz->text_count++;
       }
@@ -174,7 +227,8 @@ int32_t lzss_decode(lzss_t *lz){
   while((c = getbit(lz, 1)) != EOF){
     if(c){
       if((c = getbit(lz, 8)) == EOF) break;
-      lz->iostream.putc(lz->iostream.out, c);
+      // lz->iostream.putc(lz->iostream.out, c);
+      lzss_putc(lz, c);
       lz->buffer[r++] = c;
       r &= (BUFF_SIZE - 1);
     }else{
@@ -182,12 +236,14 @@ int32_t lzss_decode(lzss_t *lz){
       if((j = getbit(lz, LENGTH_BITS)) == EOF) break;
       for(k = 0; k <= j+1; k++){
         c = lz->buffer[(i + k) & (BUFF_SIZE - 1)];
-        lz->iostream.putc(lz->iostream.out, c);
+        // lz->iostream.putc(lz->iostream.out, c);
+        lzss_putc(lz, c);
         lz->buffer[r++] = c;
         r &= (BUFF_SIZE - 1);
       }
     }
   }
+  lzss_putc_flash(lz);
   return 0;
 }
 
@@ -200,8 +256,8 @@ int32_t lzss_chunked_decode_init_std(lzss_chunked_decoder_t *lcdz, FILE *in){
   lz->curr_mask = 0;
   lz->code_count = 0;
   lz->text_count = 0;
-  lz->iostream.getc = file_getc;
-  lz->iostream.putc = NULL;
+  lz->iostream.read = file_read;
+  lz->iostream.write = NULL;
   lz->iostream.in = in;
   lz->iostream.out = NULL;
 
@@ -214,7 +270,7 @@ int32_t lzss_chunked_decode_init_std(lzss_chunked_decoder_t *lcdz, FILE *in){
 
 int32_t lzss_chunked_decode_init_custom(lzss_chunked_decoder_t *lcdz, const lzss_io_t *iostream) {
   if(!lcdz || !iostream) return -1;
-  if(!iostream->in || !iostream->getc) return -1;
+  if(!iostream->in || !iostream->read) return -1;
   lzss_t *lz = &lcdz->lz;
   lz->bit_buffer = 0;
   lz->bit_mask = 128;
@@ -222,8 +278,8 @@ int32_t lzss_chunked_decode_init_custom(lzss_chunked_decoder_t *lcdz, const lzss
   lz->curr_mask = 0;
   lz->code_count = 0;
   lz->text_count = 0;
-  lz->iostream.getc = iostream->getc;
-  lz->iostream.putc = NULL;
+  lz->iostream.read = iostream->read;
+  lz->iostream.write = NULL;
   lz->iostream.in = iostream->in;
   lz->iostream.out = NULL;
 
