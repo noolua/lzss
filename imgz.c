@@ -1,3 +1,4 @@
+#include "lzss.h"
 #include "imgz.h"
 #include <string.h>
 #define IMGZ_HEAD_SIZE 4
@@ -10,19 +11,48 @@ enum{
   IMGZ_PIXEL_DONE,
 };
 
+enum {
+  IMGZ_MEMORY,
+  IMGZ_READER
+};
+
+typedef struct imgz_decode_stream_s {
+  uint8_t width, height, mode, palette_count;
+  uint8_t palettes[256][RGBA_SIZE]; // RGBA format
+  int32_t parse_state, wrote, pos_pixel_begin, pos_pixel_end;
+  int32_t stream_type;
+  imgz_decoder_cb_t cb;
+  union {
+    struct {
+      const void *content;
+      int32_t content_sz;
+      int32_t position;
+    } mem;
+    struct {
+      int32_t (*read)(void *handle, void *buff, int32_t buff_len);
+      void *handle;
+    } reader;
+  }input;
+  lzss_t lz;
+}imgz_decode_stream_t;
+
 static int32_t pixel_read(void* fp, void* buff, int32_t buff_len) {
   int32_t read_sz = EOF;
-  pixel_in_memory_t *in = (pixel_in_memory_t*)fp;
-  if(in->pos < in->size && buff_len > 0) {
-    read_sz = (in->size - in->pos) > buff_len ? buff_len : (in->size - in->pos);
-    memcpy(buff, in->base+in->pos, read_sz);
-    in->pos += read_sz;
+  imgz_decode_stream_t *stream = (imgz_decode_stream_t*)fp;
+  if(stream->stream_type == IMGZ_MEMORY) {
+    if(stream->input.mem.position < stream->input.mem.content_sz && buff_len > 0) {
+      read_sz = (stream->input.mem.content_sz - stream->input.mem.position) > buff_len ? buff_len : (stream->input.mem.content_sz - stream->input.mem.position);
+      memcpy(buff, stream->input.mem.content + stream->input.mem.position, read_sz);
+      stream->input.mem.position += read_sz;
+    }
+  }else{
+    return stream->input.reader.read(stream->input.reader.handle, buff, buff_len);
   }
   return read_sz;
 }
 
 static int32_t pixel_putc(void *fp, uint8_t c){
-  pixel_out_t *out = (pixel_out_t*)fp;
+  imgz_decode_stream_t *out = (imgz_decode_stream_t*)fp;
   if(out->parse_state == IMGZ_READY){
     if(out->wrote == 0) out->width = c;
     else if(out->wrote == 1) out->height = c;
@@ -69,63 +99,55 @@ static int32_t pixel_write(void *fp, void* data, int32_t data_len) {
   return data_len;
 }
 
-/*
-  PUBLIC API
-*/
-int32_t imgz_decode(lzss_t *lz, imgz_stream_t *stream, const uint8_t *encode_data, int32_t data_len, imgz_decoder_cb_t *cb){
-  if(!encode_data || data_len < 0 || !stream) return -1;
-  pixel_in_memory_t *px_in = &stream->in;
-  pixel_out_t *px_out = &stream->out;
-
-  // init
-  px_in->size = data_len;
-  px_in->pos = 0;
-  px_in->base = encode_data;
-
-  memset(px_out, 0, sizeof(pixel_out_t));
-  if(cb){
-    px_out->cb.on_header = cb->on_header;
-    px_out->cb.on_palette = cb->on_palette;
-    px_out->cb.on_pixel = cb->on_pixel;
-    px_out->cb.on_done = cb->on_done;
-    px_out->cb.ud = cb->ud;
-  }
+static void _init_decoder(imgz_decode_stream_t *stream, imgz_decoder_cb_t *cb){
+  if(!stream) return;
+  stream->cb.on_header = cb->on_header;
+  stream->cb.on_palette = cb->on_palette;
+  stream->cb.on_pixel = cb->on_pixel;
+  stream->cb.on_done = cb->on_done;
+  stream->cb.ud = cb->ud;
+  stream->parse_state = stream->wrote = stream->pos_pixel_begin = stream->pos_pixel_end = 0;
+  stream->width = stream->height = stream->mode = stream->palette_count = 0;
 
   lzss_io_t iostream = {
     .read = pixel_read,
     .write = pixel_write,
-    .in = px_in,
-    .out = px_out
+    .in = stream,
+    .out = stream
   };
-
-  // decoding
-  lzss_init_custom(lz, &iostream);
-  return lzss_decode(lz);
+  lzss_init_custom(&stream->lz, &iostream);
 }
 
-int32_t imgz_decode_file(lzss_t *lz, imgz_filestream_t *stream, imgz_decoder_cb_t *cb) {
-  if(!stream || !stream->in.file || !stream->in.read) return -1;
-  pixel_out_t *px_out = &stream->out;
+/*
+  PUBLIC API
+*/
 
-  // init
+void *imgz_decoder_malloc(void *(*func_malloc)(imgz_size_t)) {
+  if(!func_malloc) return NULL;
+  return func_malloc(sizeof(imgz_decode_stream_t));
+}
 
-  memset(px_out, 0, sizeof(pixel_out_t));
-  if(cb){
-    px_out->cb.on_header = cb->on_header;
-    px_out->cb.on_palette = cb->on_palette;
-    px_out->cb.on_pixel = cb->on_pixel;
-    px_out->cb.on_done = cb->on_done;
-    px_out->cb.ud = cb->ud;
-  }
+void imgz_decoder_free(void *decoder, void (*func_free)(void *)){
+  if(decoder && func_free) func_free(decoder);
+}
 
-  lzss_io_t iostream = {
-    .read = stream->in.read,
-    .write = pixel_write,
-    .in = stream->in.file,
-    .out = px_out
-  };
+int32_t imgz_decode_memory(void *decoder, const uint8_t *encode_data, const int32_t data_sz, imgz_decoder_cb_t *cb) {
+  if(!decoder || !encode_data || data_sz <= 0 || !cb) return -1;
+  imgz_decode_stream_t *stream = (imgz_decode_stream_t *)decoder;
+  stream->stream_type = IMGZ_MEMORY;
+  stream->input.mem.content = encode_data;
+  stream->input.mem.content_sz = data_sz;
+  stream->input.mem.position = 0;
+  _init_decoder(stream, cb);
+  return lzss_decode(&stream->lz);
+}
 
-  // decoding
-  lzss_init_custom(lz, &iostream);
-  return lzss_decode(lz);
+int32_t imgz_decode_by_reader(void *decoder, int32_t (*read)(void *in, void *buff, int32_t buff_len), void *reader_handle, imgz_decoder_cb_t *cb){
+  if(!decoder || !read || !reader_handle || !cb) return -1;
+  imgz_decode_stream_t *stream = (imgz_decode_stream_t *)decoder;
+  stream->stream_type = IMGZ_READER;
+  stream->input.reader.read = read;
+  stream->input.reader.handle = reader_handle;
+  _init_decoder(stream, cb);
+  return lzss_decode(&stream->lz);
 }
