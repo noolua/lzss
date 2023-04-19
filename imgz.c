@@ -51,52 +51,57 @@ static int32_t pixel_read(void* fp, void* buff, int32_t buff_len) {
   return read_sz;
 }
 
-static int32_t pixel_putc(void *fp, uint8_t c){
+static int32_t pixel_putbytes(void *fp, uint8_t *data, int32_t data_sz){
   imgz_decode_stream_t *out = (imgz_decode_stream_t*)fp;
-  if(out->parse_state == IMGZ_READY){
-    if(out->wrote == 0) out->width = c;
-    else if(out->wrote == 1) out->height = c;
-    else if(out->wrote == 2) out->mode = c;
-    else if(out->wrote == 3) {
-      out->palette_count = c;
-      out->parse_state = IMGZ_HEAD_DONE;
-      out->pos_pixel_begin = IMGZ_HEAD_SIZE + c * RGBA_SIZE;
-      out->pos_pixel_end = out->pos_pixel_begin + out->width * out->height;
-      if(out->cb.on_header)
-        out->cb.on_header(out->cb.ud, out->width, out->height, out->mode, out->palette_count);
+  int32_t consume = 0;
+  do{
+    uint8_t c = data[consume++];
+    switch(out->parse_state){
+      case IMGZ_READY:{
+        if(out->wrote == 0) out->width = c;
+        else if(out->wrote == 1) out->height = c;
+        else if(out->wrote == 2) out->mode = c;
+        else if(out->wrote == 3) {
+          out->palette_count = c;
+          out->parse_state = IMGZ_HEAD_DONE;
+          out->pos_pixel_begin = IMGZ_HEAD_SIZE + c * RGBA_SIZE;
+          out->pos_pixel_end = out->pos_pixel_begin + out->width * out->height;
+          if(out->cb.on_header)
+            out->cb.on_header(out->cb.ud, out->width, out->height, out->mode, out->palette_count);
+        }
+        out->wrote++;
+      }break;
+      case IMGZ_HEAD_DONE:{
+        uint8_t *pl = (uint8_t*)out->palettes;
+        pl[out->wrote - IMGZ_HEAD_SIZE] = c;
+        out->wrote++;
+        if(out->wrote == out->pos_pixel_begin){
+          out->parse_state = IMGZ_PALETTE_DONE;
+          if(out->cb.on_palette)
+            out->cb.on_palette(out->cb.ud, (uint8_t **)out->palettes, out->palette_count);
+        }
+      }break;
+      case IMGZ_PALETTE_DONE:{
+        int32_t pixel_index = out->wrote - out->pos_pixel_begin;
+        int32_t x = pixel_index % out->width, y = pixel_index / out->width;
+        if(out->cb.on_pixel){
+          out->cb.on_pixel(out->cb.ud, x, y, out->palettes[c]);
+        }
+        out->wrote++;
+        if(out->wrote == out->pos_pixel_end){
+          out->parse_state = IMGZ_PIXEL_DONE;
+          if(out->cb.on_done)
+            out->cb.on_done(out->cb.ud);
+        }
+      }
     }
-    out->wrote++;
-  }else if(out->parse_state == IMGZ_HEAD_DONE){
-    uint8_t *pl = (uint8_t*)out->palettes;
-    pl[out->wrote - IMGZ_HEAD_SIZE] = c;
-    out->wrote++;
-    if(out->wrote == out->pos_pixel_begin){
-      out->parse_state = IMGZ_PALETTE_DONE;
-      if(out->cb.on_palette)
-        out->cb.on_palette(out->cb.ud, (uint8_t **)out->palettes, out->palette_count);
-    }
-  }else if(out->parse_state == IMGZ_PALETTE_DONE){
-    int32_t pixel_index = out->wrote - out->pos_pixel_begin;
-    int32_t x = pixel_index % out->width, y = pixel_index / out->width;
-    if(out->cb.on_pixel)
-      out->cb.on_pixel(out->cb.ud, x, y, out->palettes[c]);
-    out->wrote++;
-    if(out->wrote == out->pos_pixel_end){
-      out->parse_state = IMGZ_PIXEL_DONE;
-      if(out->cb.on_done)
-        out->cb.on_done(out->cb.ud);
-    }
-  }
-  return 0;
+  }while(consume < data_sz);
+
+  return consume;
 }
 
 static int32_t pixel_write(void *fp, void* data, int32_t data_len) {
-  int32_t consume = 0;
-  uint8_t *base = (uint8_t *)data;
-  while(consume < data_len) {
-    pixel_putc(fp, base[consume++]);
-  }
-  return data_len;
+  return pixel_putbytes(fp, data, data_len);
 }
 
 static void _init_decoder(imgz_decode_stream_t *stream, imgz_decoder_cb_t *cb){
