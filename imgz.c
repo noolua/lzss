@@ -78,7 +78,7 @@ static int32_t pixel_putbytes(void *fp, uint8_t *data, int32_t data_sz){
         if(out->wrote == out->pos_pixel_begin){
           out->parse_state = IMGZ_PALETTE_DONE;
           if(out->cb.on_palette)
-            out->cb.on_palette(out->cb.ud, (uint8_t **)out->palettes, out->palette_count);
+            out->cb.on_palette(out->cb.ud, out->palettes, out->palette_count);
         }
       }break;
       case IMGZ_PALETTE_DONE:{

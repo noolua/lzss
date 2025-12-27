@@ -35,7 +35,7 @@ static int32_t on_header_impl(void* ud, uint8_t width, uint8_t height, uint8_t m
   return 0;
 }
 
-static int32_t on_palette_impl(void *ud, uint8_t *palettes[4], uint8_t palette_count){
+static int32_t on_palette_impl(void *ud, uint8_t (*palettes)[4], uint8_t palette_count){
   printf("palettes: %p, %d\n", palettes, palette_count);
   return 0;
 }
