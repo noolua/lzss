@@ -21,6 +21,7 @@ typedef struct imgz_decode_stream_s {
   uint8_t palettes[256][RGBA_SIZE]; // RGBA format
   int32_t parse_state, wrote, pos_pixel_begin, pos_pixel_end;
   int32_t stream_type;
+  int32_t step_x, step_y;
   imgz_decoder_cb_t cb;
   union {
     struct {
@@ -82,10 +83,12 @@ static int32_t pixel_putbytes(void *fp, uint8_t *data, int32_t data_sz){
         }
       }break;
       case IMGZ_PALETTE_DONE:{
-        int32_t pixel_index = out->wrote - out->pos_pixel_begin;
-        int32_t x = pixel_index % out->width, y = pixel_index / out->width;
-        if(out->cb.on_pixel){
-          out->cb.on_pixel(out->cb.ud, x, y, out->palettes[c]);
+        if(out->cb.on_pixel){          
+          out->cb.on_pixel(out->cb.ud, out->step_x++, out->step_y, out->palettes[c]);
+          if(out->step_x == out->width){
+            out->step_x = 0;
+            out->step_y++;
+          }
         }
         out->wrote++;
         if(out->wrote == out->pos_pixel_end){
@@ -113,6 +116,7 @@ static void _init_decoder(imgz_decode_stream_t *stream, imgz_decoder_cb_t *cb){
   stream->cb.ud = cb->ud;
   stream->parse_state = stream->wrote = stream->pos_pixel_begin = stream->pos_pixel_end = 0;
   stream->width = stream->height = stream->mode = stream->palette_count = 0;
+  stream->step_x = stream->step_y = 0;
 
   lzss_io_t iostream = {
     .read = pixel_read,
